@@ -160,9 +160,9 @@ static BOOL HasPersistentStore = NO;
 	static dispatch_once_t onceToken = 0;
 	dispatch_once(&onceToken, ^{
 		[[NSUserDefaults standardUserDefaults] registerDefaults:@{
-			kUserDefaultsClipboardHistoryKeepAtLeast :  @25,
-			kUserDefaultsClipboardHistoryKeepAtMost  : @500,
-			kUserDefaultsClipboardHistoryDaysToKeep  :  @30,
+			kUserDefaultsClipboardHistoryKeepAtLeast:  @25,
+			kUserDefaultsClipboardHistoryKeepAtMost:  @500,
+			kUserDefaultsClipboardHistoryDaysToKeep:   @30,
 		}];
 
 		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(applicationDidBecomeActiveNotification:) name:NSApplicationDidBecomeActiveNotification object:NSApp];
@@ -333,7 +333,11 @@ static BOOL HasPersistentStore = NO;
 				NSLog(@"failed to save context: %@", error);
 		}
 		@catch(NSException* e) {
-			NSRunAlertPanel(@"Failed Saving Clipboard History", @"CoreData threw the following exception: %@", @"Continue", nil, nil, e);
+			NSAlert* alert        = [[NSAlert alloc] init];
+			alert.messageText     = @"Failed Saving Clipboard History";
+			alert.informativeText = [NSString stringWithFormat:@"CoreData threw the following exception: %@", e];
+			[alert addButtonWithTitle:@"Continue"];
+			[alert runModal];
 		}
 	}
 	return res;
@@ -563,7 +567,7 @@ static BOOL HasPersistentStore = NO;
 	return self.current;
 }
 
-- (BOOL)selectItemAtPosition:(NSPoint)location withWidth:(CGFloat)width respondToSingleClick:(BOOL)singleClick
+- (void)selectItemAtPosition:(NSPoint)location withWidth:(CGFloat)width respondToSingleClick:(BOOL)singleClick
 {
 	[self checkForExternalPasteboardChanges];
 	NSFetchRequest* request = [NSFetchRequest fetchRequestWithEntityName:@"PasteboardEntry"];
@@ -575,7 +579,7 @@ static BOOL HasPersistentStore = NO;
 	if(!entries)
 	{
 		NSLog(@"%s %@", sel_getName(_cmd), error);
-		return NO;
+		return;
 	}
 
 	NSUInteger selectedRow = self.currentEntry ? [entries indexOfObject:self.currentEntry] : 0;
@@ -586,18 +590,19 @@ static BOOL HasPersistentStore = NO;
 		[pasteboardSelector setWidth:width];
 	if(singleClick)
 		[pasteboardSelector setPerformsActionOnSingleClick];
-	selectedRow = [pasteboardSelector showAtLocation:location];
 
-	NSSet* keep = [NSSet setWithArray:[pasteboardSelector entries]];
+	NSInteger newSelection = [pasteboardSelector showAtLocation:location];
+	NSArray* newEntries = [pasteboardSelector entries];
+
+	NSSet* keep = [NSSet setWithArray:newEntries];
 	for(OakPasteboardEntry* entry in entries)
 	{
 		if(![keep containsObject:entry])
 			[entry.managedObjectContext deleteObject:entry];
 	}
 
-	self.currentEntry = [[pasteboardSelector entries] objectAtIndex:selectedRow];
-
-	return [pasteboardSelector shouldSendAction];
+	if(newSelection != -1)
+		self.currentEntry = [newEntries objectAtIndex:newSelection];
 }
 
 - (void)selectItemForControl:(NSView*)controlView

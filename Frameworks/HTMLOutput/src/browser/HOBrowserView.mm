@@ -44,14 +44,14 @@ static void ShowLoadErrorForURL (WebFrame* frame, NSURL* url, NSError* error)
 		_webView.frameLoadDelegate      = self;
 
 		NSDictionary* views = @{
-			@"webView"   : _webView,
-			@"divider"   : OakCreateHorizontalLine([NSColor colorWithCalibratedWhite:0.500 alpha:1], [NSColor colorWithCalibratedWhite:0.750 alpha:1]),
-			@"statusBar" : _statusBar
+			@"webView":   _webView,
+			@"divider":   OakCreateHorizontalLine(OakBackgroundFillViewStyleDivider),
+			@"statusBar": _statusBar
 		};
 
 		OakAddAutoLayoutViewsToSuperview([views allValues], self);
 
-		[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[webView(==statusBar,==divider)]|"    options:NSLayoutFormatAlignAllTop           metrics:nil views:views]];
+		[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[webView(==statusBar,==divider)]|"    options:NSLayoutFormatAlignAllTop     metrics:nil views:views]];
 		[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[webView(>=10)][divider][statusBar]|" options:NSLayoutFormatAlignAllLeading metrics:nil views:views]];
 	}
 	return self;

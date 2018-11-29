@@ -6,6 +6,7 @@
 #import "OTVHUD.h"
 #import <OakCommand/OakCommand.h>
 #import <OakAppKit/OakAppKit.h>
+#import <OakAppKit/NSAlert Additions.h>
 #import <OakAppKit/NSEvent Additions.h>
 #import <OakAppKit/NSImage Additions.h>
 #import <OakAppKit/NSMenuItem Additions.h>
@@ -537,7 +538,6 @@ private:
 @property (nonatomic, copy) NSString* liveSearchString;
 @property (nonatomic) ng::ranges_t liveSearchRanges;
 @property (nonatomic, readonly) links_ptr links;
-@property (nonatomic) NSDictionary* matchCaptures; // Captures from last regexp match
 @property (nonatomic) BOOL needsEnsureSelectionIsInVisibleArea;
 @property (nonatomic, readwrite) NSString* symbol;
 @property (nonatomic) scm::status::type scmStatus;
@@ -703,7 +703,7 @@ static std::string shell_quote (std::vector<std::string> paths)
 - (void)showToolTip:(NSString*)aToolTip
 {
 	OakShowToolTip(aToolTip, [self.textView positionForWindowUnderCaret]);
-	NSAccessibilityPostNotificationWithUserInfo(self.textView, NSAccessibilityAnnouncementRequestedNotification, @{ NSAccessibilityAnnouncementKey : aToolTip });
+	NSAccessibilityPostNotificationWithUserInfo(self.textView, NSAccessibilityAnnouncementRequestedNotification, @{ NSAccessibilityAnnouncementKey: aToolTip });
 }
 
 - (void)didFind:(NSUInteger)aNumber occurrencesOf:(NSString*)aFindString atPosition:(text::pos_t const&)aPosition wrapped:(BOOL)didWrap
@@ -864,6 +864,8 @@ static std::string shell_quote (std::vector<std::string> paths)
 
 	if(_document = aDocument)
 	{
+		_scmStatus = scm::status::unknown;
+
 		documentView = std::make_shared<document_view_t>(_document, to_s(self.scopeAttributes), self.scrollPastEnd, fontScaleFactor);
 		documentView->set_command_runner([self](bundle_command_t const& cmd, ng::buffer_api_t const& buffer, ng::ranges_t const& selection, std::map<std::string, std::string> const& variables){
 			[self executeBundleCommand:cmd buffer:buffer selection:selection variables:variables];
@@ -960,9 +962,13 @@ static std::string shell_quote (std::vector<std::string> paths)
 	if(_scmStatus == newStatus)
 		return;
 
+	BOOL notifyHooks = _scmStatus != scm::status::unknown || newStatus != scm::status::none;
 	_scmStatus = newStatus;
-	for(auto const& item : bundles::query(bundles::kFieldSemanticClass, "callback.document.did-change-scm-status", [self scopeContext], bundles::kItemTypeMost, oak::uuid_t(), false))
-		[self performBundleItem:item];
+	if(notifyHooks)
+	{
+		for(auto const& item : bundles::query(bundles::kFieldSemanticClass, "callback.document.did-change-scm-status", [self scopeContext], bundles::kItemTypeMost, oak::uuid_t(), false))
+			[self performBundleItem:item];
+	}
 }
 
 - (void)setNilValueForKey:(NSString*)key
@@ -1040,7 +1046,7 @@ static std::string shell_quote (std::vector<std::string> paths)
 - (void)ensureSelectionIsInVisibleArea:(id)sender
 {
 	self.needsEnsureSelectionIsInVisibleArea = NO;
-	if([[self.window currentEvent] type] == NSLeftMouseDragged) // User is drag-selecting
+	if([[self.window currentEvent] type] == NSEventTypeLeftMouseDragged) // User is drag-selecting
 		return;
 
 	ng::range_t range = documentView->ranges().last();
@@ -1961,8 +1967,8 @@ static void update_menu_key_equivalents (NSMenu* menu, std::multimap<std::string
 		update_menu_key_equivalents([NSApp mainMenu], actionToKey);
 
 		[[NSUserDefaults standardUserDefaults] registerDefaults:@{
-			kUserDefaultsFontSmoothingKey     : @(OTVFontSmoothingDisabledForDarkHiDPI),
-			kUserDefaultsWrapColumnPresetsKey : @[ @40, @80 ],
+			kUserDefaultsFontSmoothingKey:     @(OTVFontSmoothingDisabledForDarkHiDPI),
+			kUserDefaultsWrapColumnPresetsKey: @[ @40, @80 ],
 		}];
 	});
 
@@ -2037,7 +2043,7 @@ static void update_menu_key_equivalents (NSMenu* menu, std::multimap<std::string
 	else if(plist::dictionary_t const* nested = boost::get<plist::dictionary_t>(&anAction))
 	{
 		__block id eventMonitor;
-		eventMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSKeyDownMask handler:^NSEvent*(NSEvent* event){
+		eventMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown handler:^NSEvent*(NSEvent* event){
 			plist::dictionary_t::const_iterator pair = nested->find(to_s(event));
 			if(pair != nested->end())
 			{
@@ -2056,7 +2062,7 @@ static void update_menu_key_equivalents (NSMenu* menu, std::multimap<std::string
 	BOOL hasKey = (self.keyState & (OakViewViewIsFirstResponderMask|OakViewWindowIsKeyMask|OakViewApplicationIsActiveMask)) == (OakViewViewIsFirstResponderMask|OakViewWindowIsKeyMask|OakViewApplicationIsActiveMask);
 	BOOL otherTextViewHasKey = [self.window.firstResponder isKindOfClass:[self class]];
 	BOOL recordingShortcut = [self.window.firstResponder isKindOfClass:NSClassFromString(@"OakKeyEquivalentView")];
-	BOOL noCommandFlag = (anEvent.modifierFlags & NSCommandKeyMask) != NSCommandKeyMask;
+	BOOL noCommandFlag = (anEvent.modifierFlags & NSEventModifierFlagCommand) != NSEventModifierFlagCommand;
 	if(!hasKey && (otherTextViewHasKey || recordingShortcut || noCommandFlag))
 		return NO;
 
@@ -2066,7 +2072,7 @@ static void update_menu_key_equivalents (NSMenu* menu, std::multimap<std::string
 	std::vector<bundles::item_ptr> const& items = bundles::query(bundles::kFieldKeyEquivalent, eventString, [self scopeContext]);
 	if(!items.empty())
 	{
-		if(bundles::item_ptr item = OakShowMenuForBundleItems(items, [self positionForWindowUnderCaret]))
+		if(bundles::item_ptr item = [self showMenuForBundleItems:items])
 			[self performBundleItem:item];
 		return YES;
 	}
@@ -2101,7 +2107,7 @@ static void update_menu_key_equivalents (NSMenu* menu, std::multimap<std::string
 - (void)oldKeyDown:(NSEvent*)anEvent
 {
 	std::vector<bundles::item_ptr> const& items = bundles::query(bundles::kFieldKeyEquivalent, to_s(anEvent), [self scopeContext]);
-	if(bundles::item_ptr item = OakShowMenuForBundleItems(items, [self positionForWindowUnderCaret]))
+	if(bundles::item_ptr item = [self showMenuForBundleItems:items])
 	{
 		[self performBundleItem:item];
 	}
@@ -2204,8 +2210,8 @@ static void update_menu_key_equivalents (NSMenu* menu, std::multimap<std::string
 
 - (void)flagsChanged:(NSEvent*)anEvent
 {
-	NSInteger modifiers  = [anEvent modifierFlags] & (NSAlternateKeyMask | NSControlKeyMask | NSCommandKeyMask | NSShiftKeyMask);
-	BOOL isHoldingOption = modifiers & NSAlternateKeyMask ? YES : NO;
+	NSInteger modifiers  = [anEvent modifierFlags] & (NSEventModifierFlagOption | NSEventModifierFlagControl | NSEventModifierFlagCommand | NSEventModifierFlagShift);
+	BOOL isHoldingOption = modifiers & NSEventModifierFlagOption ? YES : NO;
 
 	self.showColumnSelectionCursor = isHoldingOption;
 	if(([NSEvent pressedMouseButtons] & 1))
@@ -2217,11 +2223,11 @@ static void update_menu_key_equivalents (NSMenu* menu, std::multimap<std::string
 	{
 		BOOL tapThreshold     = [[NSDate date] timeIntervalSinceDate:_lastFlagsChangeDate] < 0.18;
 
-		BOOL didPressShift    = modifiers == NSShiftKeyMask && _lastFlags == 0;
-		BOOL didReleaseShift  = modifiers == 0 && _lastFlags == NSShiftKeyMask;
+		BOOL didPressShift    = modifiers == NSEventModifierFlagShift && _lastFlags == 0;
+		BOOL didReleaseShift  = modifiers == 0 && _lastFlags == NSEventModifierFlagShift;
 
-		BOOL didPressOption   = (modifiers & ~NSShiftKeyMask) == NSAlternateKeyMask && (_lastFlags & ~NSShiftKeyMask) == 0;
-		BOOL didReleaseOption = (modifiers & ~NSShiftKeyMask) == 0 && (_lastFlags & ~NSShiftKeyMask) == NSAlternateKeyMask;
+		BOOL didPressOption   = (modifiers & ~NSEventModifierFlagShift) == NSEventModifierFlagOption && (_lastFlags & ~NSEventModifierFlagShift) == 0;
+		BOOL didReleaseOption = (modifiers & ~NSEventModifierFlagShift) == 0 && (_lastFlags & ~NSEventModifierFlagShift) == NSEventModifierFlagOption;
 
 		OakFlagsState newFlagsState = OakFlagsStateClear;
 		if(didPressOption)
@@ -2310,6 +2316,13 @@ static void update_menu_key_equivalents (NSMenu* menu, std::multimap<std::string
 	else	{ p = [NSEvent mouseLocation]; p.y -= 16; }
 
 	return p;
+}
+
+- (bundles::item_ptr)showMenuForBundleItems:(std::vector<bundles::item_ptr> const&)items
+{
+	NSPoint pos = [self positionForWindowUnderCaret];
+	pos = [self convertPoint:[self.window convertRectFromScreen:(NSRect){ pos, NSZeroSize }].origin fromView:nil];
+	return OakShowMenuForBundleItems(items, self, pos);
 }
 
 - (NSMenu*)checkSpellingMenuForRanges:(ng::ranges_t const&)someRanges
@@ -2407,12 +2420,12 @@ static void update_menu_key_equivalents (NSMenu* menu, std::multimap<std::string
 	NSWindow* win = [self window];
 	NSEvent* anEvent = [NSApp currentEvent];
 	NSEvent* fakeEvent = [NSEvent
-		mouseEventWithType:NSLeftMouseDown
+		mouseEventWithType:NSEventTypeLeftMouseDown
 		location:[win convertRectFromScreen:(NSRect){ [self positionForWindowUnderCaret], NSZeroSize }].origin
 		modifierFlags:0
 		timestamp:[anEvent timestamp]
 		windowNumber:[win windowNumber]
-		context:[anEvent context]
+		context:nil
 		eventNumber:0
 		clickCount:1
 		pressure:1];
@@ -2547,7 +2560,7 @@ static void update_menu_key_equivalents (NSMenu* menu, std::multimap<std::string
 	if(findOperation == kFindOperationReplace || findOperation == kFindOperationReplaceAndFind)
 	{
 		std::string replacement = to_s(aFindServer.replaceString);
-		if(NSDictionary* captures = self.matchCaptures)
+		if(NSDictionary* captures = _document.matchCaptures)
 		{
 			std::map<std::string, std::string> variables;
 			for(NSString* key in [captures allKeys])
@@ -2568,7 +2581,7 @@ static void update_menu_key_equivalents (NSMenu* menu, std::multimap<std::string
 		case kFindOperationFind:
 		case kFindOperationCount:
 		{
-			self.matchCaptures = nil;
+			_document.matchCaptures = nil;
 			bool isCounting = findOperation == kFindOperationCount || findOperation == kFindOperationCountInSelection;
 
 			std::string const findStr = to_s(aFindServer.findString);
@@ -2612,12 +2625,12 @@ static void update_menu_key_equivalents (NSMenu* menu, std::multimap<std::string
 							auto newLastMatch = ng::find(*documentView, ng::ranges_t(0), findStr, (find::options_t)(options | find::backwards | find::wrap_around));
 							auto to_range = [&](auto it) { return text::range_t(documentView->convert(it->first.min().index), documentView->convert(it->first.max().index)); };
 							[newDocuments replaceObjectAtIndex:i withObject:@{
-								@"identifier"      : [NSString stringWithCxxString:documentView->identifier()],
-								@"firstMatchRange" : [NSString stringWithCxxString:to_range(newFirstMatch.begin())],
-								@"lastMatchRange"  : [NSString stringWithCxxString:to_range((newLastMatch.empty() ? newFirstMatch : newLastMatch).begin())]
+								@"identifier":      [NSString stringWithCxxString:documentView->identifier()],
+								@"firstMatchRange": [NSString stringWithCxxString:to_range(newFirstMatch.begin())],
+								@"lastMatchRange":  [NSString stringWithCxxString:to_range((newLastMatch.empty() ? newFirstMatch : newLastMatch).begin())]
 							}];
 						}
-						[OakPasteboard pasteboardWithName:NSFindPboard].auxiliaryOptionsForCurrent = @{ @"documents" : newDocuments };
+						[OakPasteboard pasteboardWithName:NSFindPboard].auxiliaryOptionsForCurrent = @{ @"documents": newDocuments };
 
 						// ====================================================
 
@@ -2666,7 +2679,7 @@ static void update_menu_key_equivalents (NSMenu* menu, std::multimap<std::string
 						NSMutableDictionary* captures = [NSMutableDictionary dictionary];
 						for(auto pair : allMatches[res.last()])
 							captures[[NSString stringWithCxxString:pair.first]] = [NSString stringWithCxxString:pair.second];
-						self.matchCaptures = captures;
+						_document.matchCaptures = captures;
 					}
 				}
 
@@ -2917,7 +2930,7 @@ static void update_menu_key_equivalents (NSMenu* menu, std::multimap<std::string
 	AUTO_REFRESH;
 	ng::range_t range;
 	std::vector<bundles::item_ptr> const& items = items_for_tab_expansion(documentView, documentView->ranges(), to_s([self scopeAttributes]), &range);
-	if(bundles::item_ptr item = OakShowMenuForBundleItems(items, [self positionForWindowUnderCaret]))
+	if(bundles::item_ptr item = [self showMenuForBundleItems:items])
 	{
 		[self recordSelector:@selector(deleteTabTrigger:) withArgument:[NSString stringWithCxxString:documentView->substr(range.first.index, range.last.index)]];
 		documentView->delete_tab_trigger(documentView->substr(range.first.index, range.last.index));
@@ -3045,7 +3058,7 @@ static char const* kOakMenuItemTitle = "OakMenuItemTitle";
 	hideCaret = !hideCaret;
 
 	// The column selection cursor may get stuck if e.g. using ⌥F2 to bring up a menu: We see the initial “option down” but never the “option release” that would normally reset the column selection cursor state.
-	if(([NSEvent modifierFlags] & NSAlternateKeyMask) == 0)
+	if(([NSEvent modifierFlags] & NSEventModifierFlagOption) == 0)
 		self.showColumnSelectionCursor = NO;
 }
 
@@ -3203,12 +3216,20 @@ static char const* kOakMenuItemTitle = "OakMenuItemTitle";
 		[textField sizeToFit];
 		[textField setFrameSize:NSMakeSize(200, NSHeight([textField frame]))];
 
-		NSAlert* alert = [NSAlert alertWithMessageText:@"Set Wrap Column" defaultButton:@"OK" alternateButton:@"Cancel" otherButton:nil informativeTextWithFormat:@"Specify what column text should wrap at:"];
+		NSAlert* alert = [NSAlert tmAlertWithMessageText:@"Set Wrap Column" informativeText:@"Specify what column text should wrap at:" buttons:@"OK", @"Cancel", nil];
 		[alert setAccessoryView:textField];
-		OakShowAlertForWindow(alert, [self window], ^(NSInteger returnCode){
-			if(returnCode == NSAlertDefaultReturn)
+
+		if(NSWindow* alertWindow = alert.window)
+		{
+			[alert layout];
+			alertWindow.initialFirstResponder = textField;
+			[alertWindow recalculateKeyViewLoop];
+		}
+
+		[alert beginSheetModalForWindow:self.window completionHandler:^(NSInteger returnCode){
+			if(returnCode == NSAlertFirstButtonReturn)
 				[self setWrapColumn:std::max<NSInteger>([textField integerValue], 10)];
-		});
+		}];
 	}
 	else
 	{
@@ -3478,7 +3499,7 @@ static char const* kOakMenuItemTitle = "OakMenuItemTitle";
 	D(DBF_OakTextView_Macros, bug("%s\n", to_s(plist::convert((__bridge CFPropertyListRef)[[NSUserDefaults standardUserDefaults] arrayForKey:@"OakMacroManagerScratchMacro"])).c_str()););
 	AUTO_REFRESH;
 	if(NSArray* scratchMacro = [[NSUserDefaults standardUserDefaults] arrayForKey:@"OakMacroManagerScratchMacro"])
-			documentView->macro_dispatch(plist::convert((__bridge CFDictionaryRef)@{ @"commands" : scratchMacro }), [self variables]);
+			documentView->macro_dispatch(plist::convert((__bridge CFDictionaryRef)@{ @"commands": scratchMacro }), [self variables]);
 	else	NSBeep();
 }
 
@@ -3491,7 +3512,7 @@ static char const* kOakMenuItemTitle = "OakMenuItemTitle";
 		{
 			oak::uuid_t uuid = oak::uuid_t().generate();
 
-			plist::dictionary_t plist = plist::convert((__bridge CFDictionaryRef)@{ @"commands" : scratchMacro });
+			plist::dictionary_t plist = plist::convert((__bridge CFDictionaryRef)@{ @"commands": scratchMacro });
 			plist[bundles::kFieldUUID] = to_s(uuid);
 			plist[bundles::kFieldName] = std::string("untitled");
 
@@ -3559,9 +3580,19 @@ static char const* kOakMenuItemTitle = "OakMenuItemTitle";
 			D(DBF_OakTextView_DragNDrop, bug("insert as text: %s\n", [path UTF8String]););
 			std::string const& content = path::content(to_s(path));
 			if(!utf8::is_valid(content.begin(), content.end()))
+			{
 				binary = true;
-			else if(content.size() < SQ(1024) || NSAlertDefaultReturn == NSRunAlertPanel(@"Inserting Large File", @"The file “%@” has a size of %.1f MB. Are you sure you want to insert this as a text file?", @"Insert File", @"Cancel", nil, [path stringByAbbreviatingWithTildeInPath], content.size() / SQ(1024.0))) // larger than 1 MB?
-				merged += content;
+			}
+			else
+			{
+				NSAlert* alert        = [[NSAlert alloc] init];
+				alert.messageText     = @"Inserting Large File";
+				alert.informativeText = [NSString stringWithFormat: @"The file “%@” has a size of %.1f MB. Are you sure you want to insert this as a text file?", [path stringByAbbreviatingWithTildeInPath], content.size() / SQ(1024.0)];
+				[alert addButtons:@"Insert File", @"Cancel", nil];
+
+				if(content.size() < SQ(1024) || [alert runModal] == NSAlertFirstButtonReturn) // larger than 1 MB?
+					merged += content;
+			}
 		}
 
 		if(binary)
@@ -3575,16 +3606,16 @@ static char const* kOakMenuItemTitle = "OakMenuItemTitle";
 		AUTO_REFRESH;
 		documentView->insert(merged, true);
 	}
-	else if(bundles::item_ptr handler = OakShowMenuForBundleItems(std::vector<bundles::item_ptr>(allHandlers.begin(), allHandlers.end()), [self positionForWindowUnderCaret]))
+	else if(bundles::item_ptr handler = [self showMenuForBundleItems:std::vector<bundles::item_ptr>(allHandlers.begin(), allHandlers.end())])
 	{
 		D(DBF_OakTextView_DragNDrop, bug("execute %s\n", handler->name_with_bundle().c_str()););
 
 		static struct { NSUInteger mask; std::string name; } const qualNames[] =
 		{
-			{ NSShiftKeyMask,     "SHIFT"    },
-			{ NSControlKeyMask,   "CONTROL"  },
-			{ NSAlternateKeyMask, "OPTION"   },
-			{ NSCommandKeyMask,   "COMMAND"  }
+			{ NSEventModifierFlagShift,     "SHIFT"    },
+			{ NSEventModifierFlagControl,   "CONTROL"  },
+			{ NSEventModifierFlagOption,    "OPTION"   },
+			{ NSEventModifierFlagCommand,   "COMMAND"  }
 		};
 
 		auto env = handler->bundle_variables();
@@ -3788,9 +3819,9 @@ static char const* kOakMenuItemTitle = "OakMenuItemTitle";
 
 - (void)actOnMouseDown
 {
-	bool optionDown  = mouseDownModifierFlags & NSAlternateKeyMask;
-	bool shiftDown   = mouseDownModifierFlags & NSShiftKeyMask;
-	bool commandDown = mouseDownModifierFlags & NSCommandKeyMask;
+	bool optionDown  = mouseDownModifierFlags & NSEventModifierFlagOption;
+	bool shiftDown   = mouseDownModifierFlags & NSEventModifierFlagShift;
+	bool commandDown = mouseDownModifierFlags & NSEventModifierFlagCommand;
 
 	ng::ranges_t s = documentView->ranges();
 
@@ -3868,7 +3899,7 @@ static char const* kOakMenuItemTitle = "OakMenuItemTitle";
 	}
 
 	NSUInteger currentModifierFlags = [anEvent modifierFlags];
-	if(currentModifierFlags & NSAlternateKeyMask)
+	if(currentModifierFlags & NSEventModifierFlagOption)
 		range.last().columnar = true;
 
 	ng::ranges_t s = documentView->ranges();
@@ -3888,7 +3919,7 @@ static char const* kOakMenuItemTitle = "OakMenuItemTitle";
 
 	NSImage* image = [[NSImage alloc] initWithSize:srcImage.size];
 	[image lockFocus];
-	[srcImage drawAtPoint:NSZeroPoint fromRect:NSZeroRect operation:NSCompositeCopy fraction:0.5];
+	[srcImage drawAtPoint:NSZeroPoint fromRect:NSZeroRect operation:NSCompositingOperationCopy fraction:0.5];
 	[image unlockFocus];
 
 	std::vector<std::string> v;
@@ -3931,7 +3962,7 @@ static char const* kOakMenuItemTitle = "OakMenuItemTitle";
 
 - (void)preparePotentialDrag:(NSEvent*)anEvent
 {
-	if([self dragDelay] != 0 && ([[self window] isKeyWindow] || ([anEvent modifierFlags] & NSCommandKeyMask)))
+	if([self dragDelay] != 0 && ([[self window] isKeyWindow] || ([anEvent modifierFlags] & NSEventModifierFlagCommand)))
 			self.initiateDragTimer = [NSTimer scheduledTimerWithTimeInterval:(0.001 * [self dragDelay]) target:self selector:@selector(changeToDragPointer:) userInfo:nil repeats:NO];
 	else	[self changeToDragPointer:nil];
 	delayMouseDown = [[self window] isKeyWindow];
@@ -3941,10 +3972,10 @@ static scope::context_t add_modifiers_to_scope (scope::context_t scope, NSUInteg
 {
 	static struct { NSUInteger modifier; char const* scope; } const map[] =
 	{
-		{ NSShiftKeyMask,      "dyn.modifier.shift"   },
-		{ NSControlKeyMask,    "dyn.modifier.control" },
-		{ NSAlternateKeyMask,  "dyn.modifier.option"  },
-		{ NSCommandKeyMask,    "dyn.modifier.command" }
+		{ NSEventModifierFlagShift,      "dyn.modifier.shift"   },
+		{ NSEventModifierFlagControl,    "dyn.modifier.control" },
+		{ NSEventModifierFlagOption,     "dyn.modifier.option"  },
+		{ NSEventModifierFlagCommand,    "dyn.modifier.command" }
 	};
 
 	for(auto const& it : map)
@@ -3989,7 +4020,7 @@ static scope::context_t add_modifiers_to_scope (scope::context_t scope, NSUInteg
 
 - (void)mouseDown:(NSEvent*)anEvent
 {
-	if([self.inputContext handleEvent:anEvent] || !documentView || [anEvent type] != NSLeftMouseDown || ignoreMouseDown)
+	if([self.inputContext handleEvent:anEvent] || !documentView || [anEvent type] != NSEventTypeLeftMouseDown || ignoreMouseDown)
 		return (void)(ignoreMouseDown = NO);
 
 	if(ng::range_t r = documentView->folded_range_at_point([self convertPoint:[anEvent locationInWindow] fromView:nil]))
@@ -3999,10 +4030,13 @@ static scope::context_t add_modifiers_to_scope (scope::context_t scope, NSUInteg
 		return;
 	}
 
-	if(macroRecordingArray && [anEvent type] == NSLeftMouseDown)
+	if(macroRecordingArray && [anEvent type] == NSEventTypeLeftMouseDown)
 	{
-		NSInteger choice = NSRunAlertPanel(@"You are recording a macro", @"While recording macros it is not possible to select text or reposition the caret using your mouse.", @"Continue", @"Stop Recording", nil);
-		if(choice == NSAlertAlternateReturn) // "Stop Macro Recording"
+		NSAlert* alert        = [[NSAlert alloc] init];
+		alert.messageText     = @"You are recording a macro";
+		alert.informativeText = @"While recording macros it is not possible to select text or reposition the caret using your mouse.";
+		[alert addButtons:@"Continue", @"Stop Recording", nil];
+		if([alert runModal] == NSAlertSecondButtonReturn) // "Stop Macro Recording"
 			self.recordingMacro = NO;
 		return;
 	}
@@ -4018,7 +4052,7 @@ static scope::context_t add_modifiers_to_scope (scope::context_t scope, NSUInteg
 	std::vector<bundles::item_ptr> const& items = bundles::query(bundles::kFieldSemanticClass, callbackName, add_modifiers_to_scope(ng::scope(*documentView, documentView->index_at_point([self convertPoint:[anEvent locationInWindow] fromView:nil]), to_s([self scopeAttributes])), [anEvent modifierFlags]));
 	if(!items.empty())
 	{
-		if(bundles::item_ptr item = OakShowMenuForBundleItems(items, [self positionForWindowUnderCaret]))
+		if(bundles::item_ptr item = [self showMenuForBundleItems:items])
 		{
 			AUTO_REFRESH;
 			documentView->set_ranges(ng::range_t(documentView->index_at_point([self convertPoint:[anEvent locationInWindow] fromView:nil]).index));
@@ -4034,9 +4068,9 @@ static scope::context_t add_modifiers_to_scope (scope::context_t scope, NSUInteg
 
 	BOOL hasFocus = (self.keyState & (OakViewViewIsFirstResponderMask|OakViewWindowIsKeyMask|OakViewApplicationIsActiveMask)) == (OakViewViewIsFirstResponderMask|OakViewWindowIsKeyMask|OakViewApplicationIsActiveMask);
 	if(!hasFocus)
-		mouseDownModifierFlags &= ~NSCommandKeyMask;
+		mouseDownModifierFlags &= ~NSEventModifierFlagCommand;
 
-	if(!(mouseDownModifierFlags & NSShiftKeyMask) && [self isPointInSelection:[self convertPoint:[anEvent locationInWindow] fromView:nil]] && [anEvent clickCount] == 1 && [self dragDelay] >= 0 && !([anEvent modifierFlags] & (NSShiftKeyMask | NSControlKeyMask | NSAlternateKeyMask | NSCommandKeyMask)))
+	if(!(mouseDownModifierFlags & NSEventModifierFlagShift) && [self isPointInSelection:[self convertPoint:[anEvent locationInWindow] fromView:nil]] && [anEvent clickCount] == 1 && [self dragDelay] >= 0 && !([anEvent modifierFlags] & (NSEventModifierFlagShift | NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagCommand)))
 			[self preparePotentialDrag:anEvent];
 	else	[self actOnMouseDown];
 }
@@ -4047,8 +4081,8 @@ static scope::context_t add_modifiers_to_scope (scope::context_t scope, NSUInteg
 		return;
 
 	NSPoint mouseCurrentPos = [self convertPoint:[anEvent locationInWindow] fromView:nil];
-	if(SQ(fabs(mouseDownPos.x - mouseCurrentPos.x)) + SQ(fabs(mouseDownPos.y - mouseCurrentPos.y)) < SQ(1))
-		return; // we didn't even drag a pixel
+	if(hypot(mouseDownPos.x - mouseCurrentPos.x, mouseDownPos.y - mouseCurrentPos.y) < 2.5)
+		return;
 
 	delayMouseDown = NO;
 	if(_showDragCursor)
@@ -4377,17 +4411,20 @@ static scope::context_t add_modifiers_to_scope (scope::context_t scope, NSUInteg
 		{
 			// We use CFRunLoopRunInMode() to handle dispatch queues and nextEventMatchingMask:… to catcn ⌃C
 			CFRunLoopRunInMode(kCFRunLoopDefaultMode, 5, true);
-			if(NSEvent* event = [NSApp nextEventMatchingMask:NSAnyEventMask untilDate:nil inMode:NSDefaultRunLoopMode dequeue:YES])
+			if(NSEvent* event = [NSApp nextEventMatchingMask:NSEventMaskAny untilDate:nil inMode:NSDefaultRunLoopMode dequeue:YES])
 			{
-				static NSEventType const events[] = { NSLeftMouseDown, NSLeftMouseUp, NSRightMouseDown, NSRightMouseUp, NSOtherMouseDown, NSOtherMouseUp, NSLeftMouseDragged, NSRightMouseDragged, NSOtherMouseDragged, NSKeyDown, NSKeyUp, NSFlagsChanged };
+				static NSEventType const events[] = { NSEventTypeLeftMouseDown, NSEventTypeLeftMouseUp, NSEventTypeRightMouseDown, NSEventTypeRightMouseUp, NSEventTypeOtherMouseDown, NSEventTypeOtherMouseUp, NSEventTypeLeftMouseDragged, NSEventTypeRightMouseDragged, NSEventTypeOtherMouseDragged, NSEventTypeKeyDown, NSEventTypeKeyUp, NSEventTypeFlagsChanged };
 				if(!oak::contains(std::begin(events), std::end(events), [event type]))
 				{
 					[NSApp sendEvent:event];
 				}
-				else if([event type] == NSKeyDown && (([[event charactersIgnoringModifiers] isEqualToString:@"c"] && ([event modifierFlags] & (NSShiftKeyMask|NSControlKeyMask|NSAlternateKeyMask|NSCommandKeyMask)) == NSControlKeyMask) || ([[event charactersIgnoringModifiers] isEqualToString:@"."] && ([event modifierFlags] & (NSShiftKeyMask|NSControlKeyMask|NSAlternateKeyMask|NSCommandKeyMask)) == NSCommandKeyMask)))
+				else if([event type] == NSEventTypeKeyDown && (([[event charactersIgnoringModifiers] isEqualToString:@"c"] && ([event modifierFlags] & (NSEventModifierFlagShift|NSEventModifierFlagControl|NSEventModifierFlagOption|NSEventModifierFlagCommand)) == NSEventModifierFlagControl) || ([[event charactersIgnoringModifiers] isEqualToString:@"."] && ([event modifierFlags] & (NSEventModifierFlagShift|NSEventModifierFlagControl|NSEventModifierFlagOption|NSEventModifierFlagCommand)) == NSEventModifierFlagCommand)))
 				{
-					NSInteger choice = NSRunAlertPanel([NSString stringWithFormat:@"Stop “%@”", to_ns(aBundleCommand.name)], @"Would you like to kill the current shell command?", @"Kill Command", @"Cancel", nil);
-					if(choice == NSAlertDefaultReturn) // "Kill Command"
+					NSAlert* alert        = [[NSAlert alloc] init];
+					alert.messageText     = [NSString stringWithFormat:@"Stop “%@”", to_ns(aBundleCommand.name)];
+					alert.informativeText = @"Would you like to kill the current shell command?";
+					[alert addButtons:@"Kill Command", @"Cancel", nil];
+					if([alert runModal]== NSAlertFirstButtonReturn) // "Kill Command"
 						[command terminate];
 				}
 				else

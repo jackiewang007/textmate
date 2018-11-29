@@ -42,7 +42,10 @@ static NSTextField* OakCreateTextField ()
 {
 	if(self = [super initWithFrame:frame])
 	{
-		[self setupStatusBarBackground];
+		self.material     = NSVisualEffectMaterialTitlebar;
+		self.blendingMode = NSVisualEffectBlendingModeWithinWindow;
+		self.state        = NSVisualEffectStateFollowsWindowActiveState;
+
 		_indeterminateProgress = YES;
 
 		_divider                  = OakCreateDividerImageView();
@@ -64,14 +67,14 @@ static NSTextField* OakCreateTextField ()
 		[_statusTextField.cell setLineBreakMode:NSLineBreakByTruncatingMiddle];
 
 		_progressIndicator = [NSProgressIndicator new];
-		_progressIndicator.controlSize          = NSSmallControlSize;
+		_progressIndicator.controlSize          = NSControlSizeSmall;
 		_progressIndicator.maxValue             = 1;
 		_progressIndicator.indeterminate        = NO;
 		_progressIndicator.displayedWhenStopped = NO;
 		_progressIndicator.bezeled              = NO;
 
 		_spinner = [NSProgressIndicator new];
-		_spinner.controlSize          = NSSmallControlSize;
+		_spinner.controlSize          = NSControlSizeSmall;
 		_spinner.style                = NSProgressIndicatorSpinningStyle;
 		_spinner.displayedWhenStopped = NO;
 
@@ -97,16 +100,16 @@ static NSTextField* OakCreateTextField ()
 	[super updateConstraints];
 
 	NSDictionary* views = @{
-		@"back"     : _goBackButton,
-		@"forward"  : _goForwardButton,
-		@"divider"  : _divider,
-		@"status"   : _statusTextField,
-		@"spinner"  : _indeterminateProgress ? _spinner : _progressIndicator,
+		@"back":    _goBackButton,
+		@"forward": _goForwardButton,
+		@"divider": _divider,
+		@"status":  _statusTextField,
+		@"spinner": _indeterminateProgress ? _spinner : _progressIndicator,
 	};
 
 	NSArray* layout = @[
 		@"H:|-(3)-[back(==22)]-(2)-[forward(==back)]-(2)-[divider]",
-		@"V:|[back(==forward,==divider)]|",
+		@"V:|[back(==forward,==divider)]|", @"V:|[forward]|", @"V:|[divider]|",
 		@"V:[status]-5-|",
 	];
 
@@ -125,16 +128,6 @@ static NSTextField* OakCreateTextField ()
 	}
 
 	[self addConstraints:_layoutConstraints];
-}
-
-- (void)drawRect:(NSRect)aRect
-{
-	if([self.window contentBorderThicknessForEdge:NSMinYEdge] < NSMaxY(self.frame))
-	{
-		[[NSColor windowBackgroundColor] set];
-		NSRectFill(aRect);
-		[super drawRect:aRect];
-	}
 }
 
 - (void)setIndeterminateProgress:(BOOL)newIndeterminateProgress

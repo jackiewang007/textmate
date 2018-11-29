@@ -16,12 +16,12 @@
 [submodule "PlugIns/dialog"]
 	path = PlugIns/dialog
 	url = https://github.com/textmate/dialog.git
-[submodule "vendor/XcodeEditor/vendor"]
-	path = vendor/XcodeEditor/vendor
-	url = https://github.com/textmate/xcode-editor.git
 [submodule "vendor/Onigmo/vendor"]
 	path = vendor/Onigmo/vendor
 	url = https://github.com/textmate/Onigmo.git
 [submodule "vendor/kvdb/vendor"]
 	path = vendor/kvdb/vendor
 	url = https://github.com/textmate/kvdb.git
+[submodule "Applications/SyntaxMate/resources/SyntaxMate.tmBundle"]
+	path = Applications/SyntaxMate/resources/SyntaxMate.tmBundle
+	url = https://github.com/shpakovski/syntaxmate.tmbundle.git

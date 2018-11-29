@@ -47,17 +47,17 @@
 
 	[encodingPopUpButton setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
 
-	OakSetAccessibilityLabel(encodingPopUpButton, @"encoding");
-	OakSetAccessibilityLabel(lineEndingsPopUpButton, @"line endings");
+	encodingPopUpButton.accessibilityLabel    = @"Encoding";
+	lineEndingsPopUpButton.accessibilityLabel = @"Line endings";
 
 	NSArray* titles = @[ @"LF", @"CR", @"CRLF" ];
 	for(NSUInteger i = 0; i < [titles count]; ++i)
 		[[lineEndingsPopUpButton.menu addItemWithTitle:titles[i] action:nil keyEquivalent:@""] setTag:i];
 
 	NSDictionary* views = @{
-		@"encodingLabel"    : OakCreateLabel(@"Encoding:"),
-		@"encodingPopUp"    : encodingPopUpButton,
-		@"lineEndingsPopUp" : lineEndingsPopUpButton,
+		@"encodingLabel":    OakCreateLabel(@"Encoding:"),
+		@"encodingPopUp":    encodingPopUpButton,
+		@"lineEndingsPopUp": lineEndingsPopUpButton,
 	};
 
 	NSView* containerView = [[NSView alloc] initWithFrame:NSZeroRect];
@@ -119,7 +119,7 @@
 	savePanel.delegate = optionsViewController;
 	[savePanel beginSheetModalForWindow:aWindow completionHandler:^(NSInteger result) {
 		savePanel.delegate = nil;
-		NSString* path = result == NSOKButton ? [[savePanel.URL filePathURL] path] : nil;
+		NSString* path = result == NSFileHandlingPanelOKButton ? [[savePanel.URL filePathURL] path] : nil;
 		encoding::type encoding(to_s(optionsViewController.lineEndings), to_s(optionsViewController.encoding));
 		aCompletionHandler(path, encoding);
 	}];
